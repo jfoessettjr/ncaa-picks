@@ -102,6 +102,9 @@ export default function App() {
               <th>Pick</th>
               <th>Win Prob</th>
               <th>Confidence</th>
+              <th>Vegas Odds</th>
+              <th>Vegas Implied Prob</th>
+              <th>Edge</th>
             </tr>
           </thead>
           <tbody>

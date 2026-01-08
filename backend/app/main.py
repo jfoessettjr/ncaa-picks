@@ -8,6 +8,13 @@ from .ncaa import get_scoreboard, extract_games
 from .elo import pick_winner
 from .elo_update import update_elo_from_games, rebuild_elo_range
 from .repo import get_or_create_team
+from .odds import (
+    fetch_ncaab_moneylines_cached,
+    build_best_price_map,
+    american_to_implied_prob,
+)
+
+
 
 app = FastAPI(title="NCAA Safest Picks API")
 
@@ -52,6 +59,15 @@ def picks(day: str | None = None):
     sb = get_scoreboard(d)
     games = extract_games(sb)
     games = [g for g in games if is_upcoming_game(g)]
+    # Pull vegas odds once per request (you can cache later)
+    odds_map = {}
+    try:
+        events = fetch_ncaab_moneylines_cached(ttl_seconds=300)  # 5 min cache
+        odds_map = build_best_price_map(events)
+    except Exception:
+        odds_map = {}
+
+
 
     db = SessionLocal()
     try:
@@ -62,6 +78,19 @@ def picks(day: str | None = None):
 
             home_adv = 0.0 if g.get("neutral") else 50.0
             side, prob = pick_winner(home_team.elo, away_team.elo, home_adv=home_adv)
+            match_key = (g["home_name"].lower(), g["away_name"].lower())
+            vegas = odds_map.get(match_key)
+
+            vegas_home_prob = vegas_away_prob = None
+            home_odds = away_odds = book = None
+
+            if vegas:
+                home_odds = vegas["home_odds"]
+                away_odds = vegas["away_odds"]
+                book = vegas.get("book")
+                vegas_home_prob = round(american_to_implied_prob(home_odds), 4)
+                vegas_away_prob = round(american_to_implied_prob(away_odds), 4)
+
             pick_team = g["home_name"] if side == "HOME" else g["away_name"]
 
             conf = confidence_label(float(prob))
@@ -77,6 +106,12 @@ def picks(day: str | None = None):
                 "confidence": conf,
                 "status": g.get("status"),
                 "neutral": bool(g.get("neutral")),
+                "home_odds": home_odds,
+                "away_odds": away_odds,
+                "vegas_home_prob": vegas_home_prob,
+                "vegas_away_prob": vegas_away_prob,
+                "book": book,
+                "edge": round(float(prob) - (vegas_home_prob if side == "HOME" else vegas_away_prob or 0.0), 4) if vegas else None,
             })
 
         # Commit any “new team inserted” changes
