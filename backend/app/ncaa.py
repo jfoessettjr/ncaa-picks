@@ -2,6 +2,8 @@ import json
 import time
 import requests
 from datetime import date
+from .team_ids import canonical_team_id
+
 
 from .db import SessionLocal
 from .repo import cache_get, cache_set
@@ -72,8 +74,12 @@ def extract_games(scoreboard_json: dict) -> list[dict]:
             return names.get("short") or names.get("seo") or t.get("name") or "Unknown"
 
         def team_id(t: dict) -> str:
-            # If the API provides a stable id, use it. Otherwise fall back to name.
-            return str(t.get("id") or team_name(t))
+            # Prefer stable numeric/id if the API provides one,
+            # otherwise canonicalize the name.
+            if t.get("id"):
+                return str(t["id"])
+            return canonical_team_id(team_name(t))
+
 
         games.append({
             "home_id": team_id(home),
