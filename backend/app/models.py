@@ -6,3 +6,4 @@ class Pick(BaseModel):
     away: str
     pick: str
     win_prob: float
+    confidence: str

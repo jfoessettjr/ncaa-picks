@@ -43,6 +43,14 @@ def picks(day: str | None = None):
 
     sb = get_scoreboard(d)
     games = extract_games(sb)
+    
+    def is_upcoming(g: dict) -> bool:
+        s = (g.get("status") or "").strip().lower()
+        # keep only games that haven't started
+        return s in ("pre", "scheduled", "pregame", "upcoming")
+
+    games = [g for g in games if is_upcoming(g)]
+
 
     def is_upcoming(g):
         s = (g.get("status") or "").lower()
@@ -83,6 +91,7 @@ def picks(day: str | None = None):
             "away": g["away_name"],
             "pick": pick_team,
             "win_prob": round(float(prob), 4),
+            "confidnce" : confidence,
         })
 
     picks.sort(key=lambda x: x["win_prob"], reverse=True)
