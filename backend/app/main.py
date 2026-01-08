@@ -63,3 +63,19 @@ def picks(day: str | None = None):
 
     picks.sort(key=lambda x: x["win_prob"], reverse=True)
     return picks[:5]
+
+    from .elo_update import update_elo_from_games
+from .ncaa import get_scoreboard, extract_games
+from datetime import date
+from fastapi import HTTPException
+
+@app.post("/api/admin/update-elo")
+def admin_update_elo(day: str):
+    d = date.fromisoformat(day)
+    sb = get_scoreboard(d)
+    games = extract_games(sb)
+    if not games:
+        return {"games_updated": 0, "note": "No games found."}
+
+    result = update_elo_from_games(games)
+    return result
