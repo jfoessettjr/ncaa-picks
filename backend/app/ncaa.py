@@ -4,15 +4,16 @@ import requests
 from datetime import date
 from .db import get_conn
 
-# Primary: NCAA JSON
 def _ncaa_url(d: date) -> str:
     yyyy, mm, dd = d.strftime("%Y"), d.strftime("%m"), d.strftime("%d")
     return f"https://data.ncaa.com/casablanca/scoreboard/basketball-men/d1/{yyyy}/{mm}/{dd}/scoreboard.json"
 
+def _proxy_url(d: date) -> str:
+    yyyy, mm, dd = d.strftime("%Y"), d.strftime("%m"), d.strftime("%d")
+    return f"https://ncaa-api.henrygd.me/casablanca/scoreboard/basketball-men/d1/{yyyy}/{mm}/{dd}/scoreboard.json"
+
+
 def get_scoreboard(d: date, cache_seconds: int = 300) -> dict:
-    """
-    Fetch the NCAA scoreboard JSON with a simple DB cache.
-    """
     key = f"scoreboard:{d.isoformat()}"
     now = int(time.time())
 
@@ -24,8 +25,13 @@ def get_scoreboard(d: date, cache_seconds: int = 300) -> dict:
 
     url = _ncaa_url(d)
     r = requests.get(url, timeout=20)
-    r.raise_for_status()
-    payload = r.json()
+
+    # ✅ If NCAA has no file for that date, treat it as “no games”
+    if r.status_code == 404:
+        payload = {"games": []}
+    else:
+        r.raise_for_status()
+        payload = r.json()
 
     conn.execute(
         "INSERT OR REPLACE INTO cache(key, value, created_at) VALUES(?,?,?)",
@@ -34,6 +40,22 @@ def get_scoreboard(d: date, cache_seconds: int = 300) -> dict:
     conn.commit()
     conn.close()
     return payload
+
+try_urls = [_ncaa_url(d), _proxy_url(d)]
+payload = None
+
+for url in try_urls:
+    r = requests.get(url, timeout=20)
+    if r.status_code == 404:
+        payload = {"games": []}
+        break
+    if r.ok:
+        payload = r.json()
+        break
+
+if payload is None:
+    r.raise_for_status()
+
 
 def extract_games(scoreboard_json: dict) -> list[dict]:
     """
@@ -67,4 +89,6 @@ def extract_games(scoreboard_json: dict) -> list[dict]:
             "status": g.get("gameState") or g.get("status") or "unknown",
         })
 
-    return games
+    games = extract_games(sb)
+    if not games:
+        return []
