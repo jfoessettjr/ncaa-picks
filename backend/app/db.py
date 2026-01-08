@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS cache (
   value TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS elo_runs (
+  day TEXT PRIMARY KEY,
+  processed_at INTEGER NOT NULL
+);
 """
 
 def get_conn() -> sqlite3.Connection:

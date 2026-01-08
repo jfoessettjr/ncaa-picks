@@ -6,6 +6,8 @@ from .db import init_db, get_conn
 from .ncaa import get_scoreboard, extract_games
 from .elo import pick_winner
 from .models import Pick
+from .elo_update import update_elo_from_games
+from .elo_update import rebuild_elo_range
 
 app = FastAPI(title="NCAA Safest Picks API")
 
@@ -79,3 +81,11 @@ def admin_update_elo(day: str):
 
     result = update_elo_from_games(games)
     return result
+
+from datetime import date
+
+@app.post("/api/admin/rebuild-elo")
+def admin_rebuild_elo(start: str, end: str):
+    start_d = date.fromisoformat(start)
+    end_d = date.fromisoformat(end)
+    return rebuild_elo_range(start_d, end_d)
