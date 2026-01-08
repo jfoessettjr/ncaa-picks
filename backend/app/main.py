@@ -1,0 +1,65 @@
+from datetime import date, datetime
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from .db import init_db, get_conn
+from .ncaa import get_scoreboard, extract_games
+from .elo import pick_winner
+from .models import Pick
+
+app = FastAPI(title="NCAA Safest Picks API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.on_event("startup")
+def startup():
+    init_db()
+
+def get_or_create_team(team_id: str, name: str) -> float:
+    conn = get_conn()
+    row = conn.execute("SELECT elo FROM teams WHERE id=?", (team_id,)).fetchone()
+    if row:
+        conn.close()
+        return float(row["elo"])
+
+    # New team: start neutral
+    elo = 1500.0
+    conn.execute("INSERT INTO teams(id, name, elo) VALUES(?,?,?)", (team_id, name, elo))
+    conn.commit()
+    conn.close()
+    return elo
+
+@app.get("/api/picks", response_model=list[Pick])
+def picks(day: str | None = None):
+    d = date.fromisoformat(day) if day else date.today()
+
+    sb = get_scoreboard(d)
+    games = extract_games(sb)
+
+    picks = []
+    for g in games:
+        home_elo = get_or_create_team(g["home_id"], g["home_name"])
+        away_elo = get_or_create_team(g["away_id"], g["away_name"])
+
+        # Neutral site? remove home advantage
+        home_adv = 0.0 if g["neutral"] else 50.0
+
+        side, prob = pick_winner(home_elo, away_elo, home_adv=home_adv)
+        pick_team = g["home_name"] if side == "HOME" else g["away_name"]
+
+        picks.append({
+            "date": d.isoformat(),
+            "home": g["home_name"],
+            "away": g["away_name"],
+            "pick": pick_team,
+            "win_prob": round(float(prob), 4),
+        })
+
+    picks.sort(key=lambda x: x["win_prob"], reverse=True)
+    return picks[:5]
