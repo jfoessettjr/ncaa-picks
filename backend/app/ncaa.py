@@ -2,7 +2,9 @@ import json
 import time
 import requests
 from datetime import date
-from .db import get_conn
+
+from .db import SessionLocal
+from .repo import cache_get, cache_set
 
 
 def _proxy_url(d: date) -> str:
@@ -12,50 +14,49 @@ def _proxy_url(d: date) -> str:
 
 def get_scoreboard(d: date, cache_seconds: int = 300) -> dict:
     """
-    Fetch NCAA men's D1 basketball scoreboard.
-    Uses henrygd NCAA API. Gracefully handles 404 / empty days.
+    Fetch NCAA men's D1 basketball scoreboard (JSON).
+    Uses Postgres-backed cache table via repo.py (shared across instances).
+    Returns {"games": []} on 404 or request failure.
     """
     key = f"scoreboard:{d.isoformat()}"
     now = int(time.time())
 
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT value, created_at FROM cache WHERE key=?",
-        (key,)
-    ).fetchone()
-
-    if row and (now - int(row["created_at"]) <= cache_seconds):
-        conn.close()
-        return json.loads(row["value"])
-
-    payload = {"games": []}
-
+    db = SessionLocal()
     try:
-        r = requests.get(_proxy_url(d), timeout=20)
+        row = cache_get(db, key)
+        if row and (now - int(row.created_at) <= cache_seconds):
+            try:
+                return json.loads(row.value)
+            except Exception:
+                # corrupted cache entry; fall through to refetch
+                pass
 
-        if r.status_code == 404:
-            payload = {"games": []}
-        elif r.ok:
-            payload = r.json()
-        else:
-            r.raise_for_status()
-
-    except requests.RequestException:
         payload = {"games": []}
 
-    conn.execute(
-        "INSERT OR REPLACE INTO cache(key, value, created_at) VALUES (?,?,?)",
-        (key, json.dumps(payload), now)
-    )
-    conn.commit()
-    conn.close()
+        try:
+            r = requests.get(_proxy_url(d), timeout=20)
 
-    return payload
+            if r.status_code == 404:
+                payload = {"games": []}
+            elif r.ok:
+                payload = r.json()
+            else:
+                r.raise_for_status()
+
+        except requests.RequestException:
+            payload = {"games": []}
+
+        cache_set(db, key, json.dumps(payload), created_at=now)
+        db.commit()
+        return payload
+    finally:
+        db.close()
 
 
 def extract_games(scoreboard_json: dict) -> list[dict]:
     """
-    Normalize games from henrygd NCAA scoreboard.
+    Normalize the henrygd scoreboard into:
+    [{home_id, home_name, away_id, away_name, neutral, status, home_score, away_score}, ...]
     """
     games = []
 
@@ -63,19 +64,15 @@ def extract_games(scoreboard_json: dict) -> list[dict]:
     for wrapper in raw_games:
         g = wrapper.get("game", wrapper)
 
-        home = g.get("home", {})
-        away = g.get("away", {})
-        
-        def team_name(t):
-            names = t.get("names", {})
-            return (
-                names.get("short")
-                or names.get("seo")
-                or t.get("name")
-                or "Unknown"
-            )
+        home = g.get("home", {}) or {}
+        away = g.get("away", {}) or {}
 
-        def team_id(t):
+        def team_name(t: dict) -> str:
+            names = t.get("names", {}) or {}
+            return names.get("short") or names.get("seo") or t.get("name") or "Unknown"
+
+        def team_id(t: dict) -> str:
+            # If the API provides a stable id, use it. Otherwise fall back to name.
             return str(t.get("id") or team_name(t))
 
         games.append({
@@ -84,10 +81,9 @@ def extract_games(scoreboard_json: dict) -> list[dict]:
             "away_id": team_id(away),
             "away_name": team_name(away),
             "neutral": bool(g.get("neutralSite")),
-            "status": g.get("gameState", "unknown"),
+            "status": (g.get("gameState") or g.get("status") or "unknown"),
             "home_score": home.get("score"),
             "away_score": away.get("score"),
         })
 
     return games
-

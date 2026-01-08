@@ -1,34 +1,37 @@
-import sqlite3
-from pathlib import Path
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DB_PATH = Path(__file__).resolve().parent.parent / "ncaa.sqlite3"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ncaa.sqlite3")
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS teams (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  elo REAL NOT NULL
-);
+# Render gives postgres URLs like postgres://..., SQLAlchemy expects postgresql://...
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-CREATE TABLE IF NOT EXISTS cache (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
+connect_args = {}
+if DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
 
-CREATE TABLE IF NOT EXISTS elo_runs (
-  day TEXT PRIMARY KEY,
-  processed_at INTEGER NOT NULL
-);
-"""
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    connect_args=connect_args,
+    isolation_level="READ COMMITTED",
+)
 
-def get_conn() -> sqlite3.Connection:
-  conn = sqlite3.connect(DB_PATH)
-  conn.row_factory = sqlite3.Row
-  return conn
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+class Base(DeclarativeBase):
+    pass
 
 def init_db():
-  conn = get_conn()
-  conn.executescript(SCHEMA)
-  conn.commit()
-  conn.close()
+    # Import models so metadata is registered
+    from . import models  # noqa: F401
+    Base.metadata.create_all(bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
