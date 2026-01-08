@@ -44,6 +44,14 @@ def picks(day: str | None = None):
     sb = get_scoreboard(d)
     games = extract_games(sb)
 
+    def is_upcoming(g):
+        s = (g.get("status") or "").lower()
+        # keep only pregame/scheduled-ish statuses
+        return ("pre" in s) or ("scheduled" in s) or (s in ("pre", "scheduled"))
+
+    games = [g for g in games if is_upcoming(g)]
+
+    
     picks = []
     for g in games:
         home_elo = get_or_create_team(g["home_id"], g["home_name"])
@@ -54,6 +62,20 @@ def picks(day: str | None = None):
 
         side, prob = pick_winner(home_elo, away_elo, home_adv=home_adv)
         pick_team = g["home_name"] if side == "HOME" else g["away_name"]
+        
+        if prob >= 0.85:
+            label = "LOCK"
+        elif prob >= 0.75:
+            label = "STRONG"
+        elif prob >= 0.65:
+            label = "LEAN"
+        else:
+            label = "PASS"
+            
+        if label == "PASS":
+            continue
+
+
 
         picks.append({
             "date": d.isoformat(),
@@ -89,3 +111,18 @@ def admin_rebuild_elo(start: str, end: str):
     start_d = date.fromisoformat(start)
     end_d = date.fromisoformat(end)
     return rebuild_elo_range(start_d, end_d)
+
+@app.get("/api/debug/sample-game")
+def debug_sample_game(day: str):
+    from datetime import date
+    from .ncaa import get_scoreboard, extract_games
+
+    d = date.fromisoformat(day)
+    sb = get_scoreboard(d)
+    games = extract_games(sb)
+
+    if not games:
+        return {"error": "No games found for this date"}
+
+    # Return just the first game
+    return games[0]
