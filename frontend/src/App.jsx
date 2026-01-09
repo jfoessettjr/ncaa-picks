@@ -11,6 +11,7 @@ export default function App() {
     let cancelled = false;
 
     async function load() {
+      console.log("VITE_API_URL =", import.meta.env.VITE_API_URL);
       setLoading(true);
       setErr("");
 
