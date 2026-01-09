@@ -18,10 +18,8 @@ from .odds import (
 
 app = FastAPI(title="NCAA Safest Picks API")
 
-# CORS (Render/Netlify friendly)
-# Set CORS_ORIGINS to comma-separated list, e.g.:
-# https://your-site.netlify.app,http://localhost:5173
-origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+cors_origins = [o.strip() for o in cors_origins if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
